@@ -1,30 +1,55 @@
-import { initializeDb, turso } from "@/lib/turso";
+import { getTursoClient, initializeDb } from "@/lib/turso";
 
 const REQUIRED_EMAIL = "kts123@estsoft.com";
 
-export async function seedRequiredWhitelistUser() {
+async function ensureWhitelistSeeded() {
+  const db = getTursoClient();
+  if (!db) return null;
+
   await initializeDb();
-  await turso.execute({
+
+  await db.execute({
     sql: `INSERT OR IGNORE INTO whitelist_users (email) VALUES (?)`,
-    args: [REQUIRED_EMAIL]
+    args: [REQUIRED_EMAIL],
   });
+
+  return db;
+}
+
+export async function seedRequiredWhitelistUser() {
+  await ensureWhitelistSeeded();
 }
 
 export async function isWhitelisted(email?: string | null) {
   if (!email) return false;
 
-  await seedRequiredWhitelistUser();
+  const db = await ensureWhitelistSeeded();
 
-  const result = await turso.execute({
-    sql: `SELECT email FROM whitelist_users WHERE email = ? LIMIT 1`,
-    args: [email]
+  if (!db) {
+    return email === REQUIRED_EMAIL;
+  }
+
+  const result = await db.execute({
+    sql: `SELECT 1 FROM whitelist_users WHERE email = ? LIMIT 1`,
+    args: [email],
   });
 
   return result.rows.length > 0;
 }
 
 export async function getWhitelist() {
-  await seedRequiredWhitelistUser();
-  const result = await turso.execute(`SELECT email, created_at FROM whitelist_users ORDER BY created_at ASC`);
-  return result.rows;
+  const db = await ensureWhitelistSeeded();
+
+  if (!db) {
+    return [{ email: REQUIRED_EMAIL, created_at: "fallback" }];
+  }
+
+  const result = await db.execute(
+    `SELECT email, created_at FROM whitelist_users ORDER BY created_at ASC`
+  );
+
+  return result.rows.map((row) => ({
+    email: String(row.email),
+    created_at: String(row.created_at),
+  }));
 }
